@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>سفراء الأضاحي 🌟</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #F5F7FA; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; }
+  ::-webkit-scrollbar { display: none; }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── Firebase REST ──────────────────────────────────────────────────────────────
+const DB = "https://sofara-adahi-default-rtdb.firebaseio.com";
+const fbGet = async (p) => { try { const r = await fetch(`${DB}/${p}.json`); return r.ok ? r.json() : null; } catch { return null; } };
+const fbSet = async (p, d) => { await fetch(`${DB}/${p}.json`, { method: "PUT", body: JSON.stringify(d) }); };
+const fbPush = async (p, d) => { const r = await fetch(`${DB}/${p}.json`, { method: "POST", body: JSON.stringify(d) }); const j = await r.json(); return j.name; };
+const fbDelete = async (p) => { await fetch(`${DB}/${p}.json`, { method: "DELETE" }); };
+
+// ── Accounts ───────────────────────────────────────────────────────────────────
+const ACCOUNTS = [
+  { username: "admin",   password: "admin123",  role: "admin",  teamId: null },
+  { username: "leader1", password: "L1@sofara", role: "leader", teamId: 1 },
+  { username: "leader2", password: "L2@sofara", role: "leader", teamId: 2 },
+  { username: "leader3", password: "L3@sofara", role: "leader", teamId: 3 },
+];
+
+// ── Defaults ───────────────────────────────────────────────────────────────────
+const DEF_TEAMS = [
+  { id: 1, name: "تيم 1", color: "#FBAE42", emoji: "🌟" },
+  { id: 2, name: "تيم 2", color: "#0A4976", emoji: "🌿" },
+  { id: 3, name: "تيم 3", color: "#22C55E", emoji: "❤️" },
+];
+const DEF_TASKS = [
+  { name: "ستوري",              points: 2,  icon: "📱" },
+  { name: "بوست",               points: 5,  icon: "📝" },
+  { name: "فيديو",              points: 10, icon: "🎬" },
+  { name: "جاب متبرع جديد",     points: 15, icon: "💰" },
+  { name: "جاب متطوع جديد",     points: 20, icon: "🙌" },
+  { name: "ساعة القوة اليومية", points: 5,  icon: "⚡" },
+  { name: "مشاركة ميدانية",    points: 25, icon: "🏃" },
+];
+
+// ── Colors ─────────────────────────────────────────────────────────────────────
+const C = { gold:"#FBAE42", blue:"#0A4976", green:"#22C55E", bg:"#F5F7FA", text:"#1a2b3c", muted:"#6b7c93", danger:"#ef4444", card:"rgba(255,255,255,0.97)" };
+
+// ── Style helpers ──────────────────────────────────────────────────────────────
+const card = { background: C.card, borderRadius: 16, padding: 16, marginBottom: 14, boxShadow: "0 2px 16px rgba(0,0,0,0.07)", border: "1px solid rgba(0,0,0,0.05)" };
+const inp = { width:"100%", padding:"10px 14px", borderRadius:12, border:"1.5px solid #dde3ec", fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box", background:"#f9fafc", direction:"rtl" };
+const lbl = { fontSize:13, fontWeight:600, color:C.muted, marginBottom:4, display:"block" };
+const btn = (color=C.blue, sm=false) => ({ background:color, color:"#fff", border:"none", borderRadius:sm?10:12, padding:sm?"6px 14px":"10px 20px", fontWeight:700, cursor:"pointer", fontSize:sm?12:14, fontFamily:"inherit" });
+const btnOut = (color=C.blue) => ({ background:"transparent", color:color, border:`2px solid ${color}`, borderRadius:12, padding:"8px 18px", fontWeight:700, cursor:"pointer", fontSize:13, fontFamily:"inherit" });
+const tab = (active) => ({ padding:"8px 14px", borderRadius:20, border:"none", cursor:"pointer", fontWeight:active?700:500, fontSize:13, whiteSpace:"nowrap", background:active?C.blue:"transparent", color:active?"#fff":C.muted, transition:"all 0.2s" });
+
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function Toast({ msg, type, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 3000); return () => clearTimeout(t); }, [onDone]);
+  const bg = type==="error" ? C.danger : type==="success" ? C.green : C.blue;
+  return <div style={{ position:"fixed", bottom:24, left:16, right:16, maxWidth:380, margin:"0 auto", background:bg, color:"#fff", padding:"12px 20px", borderRadius:14, fontWeight:600, fontSize:14, zIndex:9999, boxShadow:"0 4px 20px rgba(0,0,0,0.25)", animation:"slideUp 0.3s ease", textAlign:"center" }}>{msg}</div>;
+}
+
+// ── ProgressBar ────────────────────────────────────────────────────────────────
+function ProgressBar({ value, max, color=C.green, milestones=[] }) {
+  const pct = max > 0 ? Math.min(100, Math.round((value/max)*100)) : 0;
+  return (
+    <div>
+      <div style={{ background:"#e8edf3", borderRadius:99, height:20, position:"relative", overflow:"hidden" }}>
+        <div style={{ width:`${pct}%`, background:`linear-gradient(90deg,${color},${color}bb)`, height:"100%", borderRadius:99, transition:"width 0.6s ease", display:"flex", alignItems:"center", justifyContent:"flex-end" }}>
+          {pct > 12 && <span style={{ color:"#fff", fontSize:11, fontWeight:700, paddingLeft:8, paddingRight:4 }}>{pct}%</span>}
+        </div>
+        {milestones.map((m,i) => <div key={i} style={{ position:"absolute", top:0, left:`${m.pct}%`, width:2, height:"100%", background:"rgba(0,0,0,0.18)" }} />)}
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted, marginTop:4 }}>
+        <span>{(value||0).toLocaleString()} / {(max||0).toLocaleString()} جنيه</span>
+        <span>{pct}%</span>
+      </div>
+      {milestones.length > 0 && (
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:8 }}>
+          {milestones.map((m,i) => (
+            <span key={i} style={{ fontSize:11, padding:"3px 10px", borderRadius:20, background:m.reached?"#dcfce7":"#f1f5f9", color:m.reached?"#166534":C.muted, fontWeight:600, border:`1px solid ${m.reached?"#86efac":"#e2e8f0"}` }}>
+              {m.reached?"✅":"🎯"} {m.pct}% = {m.points} نقطة
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────────
+function Modal({ title, onClose, children }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={onClose}>
+      <div style={{ ...card, maxWidth:480, width:"100%", maxHeight:"88vh", overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <h3 style={{ margin:0, color:C.blue, fontSize:16 }}>{title}</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:22, cursor:"pointer", color:C.muted }}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Login ──────────────────────────────────────────────────────────────────────
+function Login({ onLogin }) {
+  const [u,setU]=useState(""); const [p,setP]=useState(""); const [err,setErr]=useState("");
+  const go = () => { const a=ACCOUNTS.find(a=>a.username===u&&a.password===p); if(a) onLogin(a); else setErr("بيانات غير صحيحة ❌"); };
+  return (
+    <div style={{ minHeight:"100vh", background:`linear-gradient(135deg,${C.blue} 0%,#0d5fa0 60%,#0a3d6e 100%)`, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div style={{ background:"rgba(255,255,255,0.98)", borderRadius:24, padding:"40px 28px", width:"100%", maxWidth:380, boxShadow:"0 24px 70px rgba(0,0,0,0.35)" }}>
+        <div style={{ textAlign:"center", marginBottom:32 }}>
+          <div style={{ fontSize:56 }}>🌟</div>
+          <h1 style={{ color:C.blue, margin:"10px 0 4px", fontSize:24, fontWeight:800 }}>سفراء الأضاحي</h1>
+          <p style={{ color:C.muted, fontSize:13 }}>منصة إدارة المتطوعين</p>
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <label style={lbl}>اسم المستخدم</label>
+          <input style={inp} value={u} onChange={e=>setU(e.target.value)} placeholder="admin" />
+        </div>
+        <div style={{ marginBottom:20 }}>
+          <label style={lbl}>كلمة المرور</label>
+          <input style={inp} type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&go()} />
+        </div>
+        {err && <p style={{ color:C.danger, fontSize:13, marginBottom:12, textAlign:"center" }}>{err}</p>}
+        <button style={{ ...btn(C.blue), width:"100%", padding:"13px 0", fontSize:16 }} onClick={go}>دخول 🚀</button>
+        <p style={{ textAlign:"center", fontSize:11, color:C.muted, marginTop:20 }}>إنت مش متطوع… إنت سفير 🌟</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Admin Leaderboard ──────────────────────────────────────────────────────────
+function AdminLeaderboard({ teams, volunteers, getVolPoints, getTeamVolPoints, getTeamTeamPoints, getTeamMoneyTotal, getTeamMoneyPoints }) {
+  const ranked = [...teams].map(t => ({
+    ...t,
+    volPts: getTeamVolPoints(t.id), teamPts: getTeamTeamPoints(t.id),
+    moneyPts: getTeamMoneyPoints(t.id), money: getTeamMoneyTotal(t.id),
+    total: getTeamVolPoints(t.id)+getTeamTeamPoints(t.id)+getTeamMoneyPoints(t.id),
+  })).sort((a,b)=>b.total-a.total);
+  const medals = ["🥇","🥈","🥉"];
+  return (
+    <div>
+      <h2 style={{ color:C.blue, marginBottom:16, fontSize:18 }}>🏆 ترتيب التيمات</h2>
+      {ranked.map((t,i)=>(
+        <div key={t.id} style={{ ...card, borderRight:`5px solid ${t.color}`, background:i===0?"linear-gradient(135deg,#fffbf0,#fff)":C.card }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div>
+              <div style={{ fontSize:20, marginBottom:6 }}>{medals[i]||`#${i+1}`} {t.emoji} {t.name}</div>
+              <div style={{ fontSize:22, fontWeight:800, color:t.color }}>{t.total.toLocaleString()} نقطة</div>
+            </div>
+            <div style={{ textAlign:"right", fontSize:12, color:C.muted, lineHeight:1.8 }}>
+              <div>👤 أفراد: <b style={{color:C.text}}>{t.volPts}</b></div>
+              <div>🎯 تيم: <b style={{color:C.text}}>{t.teamPts}</b></div>
+              <div>💰 تبرع: <b style={{color:C.text}}>{t.moneyPts}</b></div>
+              <div>💵 <b style={{color:C.green}}>{t.money.toLocaleString()} جنيه</b></div>
+            </div>
+          </div>
+        </div>
+      ))}
+      <h3 style={{ color:C.blue, marginTop:24, marginBottom:12 }}>👤 أفضل المتطوعين</h3>
+      {Object.entries(volunteers).map(([id,v])=>({...v,id,pts:getVolPoints(id)})).sort((a,b)=>b.pts-a.pts).slice(0,10).map((v,i)=>{
+        const t=teams.find(t=>t.id===v.teamId);
+        return (
+          <div key={v.id} style={{ ...card, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+              <span style={{ fontWeight:700, color:C.muted, minWidth:28 }}>#{i+1}</span>
+              <div>
+                <div style={{ fontWeight:700, fontSize:14 }}>{v.name}</div>
+                <span style={{ fontSize:11, padding:"1px 8px", borderRadius:10, background:(t?.color||"#ccc")+"22", color:t?.color||C.muted, fontWeight:600 }}>{t?.emoji} {t?.name}</span>
+              </div>
+            </div>
+            <div style={{ fontWeight:800, color:C.blue, fontSize:16 }}>{v.pts} نقطة</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Admin Volunteers ───────────────────────────────────────────────────────────
+function AdminVolunteers({ teams, volunteers, getVolPoints, loadAll, showToast }) {
+  const [ft,setFt]=useState("all"); const [showAdd,setShowAdd]=useState(false);
+  const [newName,setNewName]=useState(""); const [newTeam,setNewTeam]=useState(teams[0]?.id||1);
+  const [delC,setDelC]=useState(null);
+
+  const filtered = Object.entries(volunteers)
+    .filter(([,v])=>ft==="all"||v.teamId===parseInt(ft))
+    .map(([id,v])=>({...v,id,pts:getVolPoints(id)}))
+    .sort((a,b)=>b.pts-a.pts);
+
+  const addVol = async () => {
+    if(!newName.trim()) return;
+    await fbPush("volunteers",{name:newName.trim(),teamId:parseInt(newTeam),createdAt:new Date().toISOString()});
+    showToast(`تم إضافة ${newName} ✅`); setNewName(""); setShowAdd(false); loadAll();
+  };
+  const delVol = async (id) => { await fbDelete(`volunteers/${id}`); showToast("تم الحذف","error"); setDelC(null); loadAll(); };
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <h2 style={{ color:C.blue, margin:0, fontSize:18 }}>👥 المتطوعين</h2>
+        <button style={btn(C.green)} onClick={()=>setShowAdd(true)}>+ إضافة</button>
+      </div>
+      <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+        <button style={tab(ft==="all")} onClick={()=>setFt("all")}>الكل ({Object.keys(volunteers).length})</button>
+        {teams.map(t=><button key={t.id} style={tab(ft===String(t.id))} onClick={()=>setFt(String(t.id))}>{t.emoji} {t.name}</button>)}
+      </div>
+      {filtered.map(v=>{
+        const t=teams.find(t=>t.id===v.teamId);
+        return (
+          <div key={v.id} style={{ ...card, padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontWeight:700 }}>{v.name}</div>
+              <span style={{ fontSize:11, padding:"2px 8px", borderRadius:10, background:(t?.color||"#ccc")+"22", color:t?.color, fontWeight:600 }}>{t?.emoji} {t?.name}</span>
+            </div>
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <div style={{ fontWeight:800, color:C.blue }}>{v.pts} نقطة</div>
+              <button onClick={()=>setDelC(v)} style={{ ...btn(C.danger,true), padding:"4px 10px" }}>حذف</button>
+            </div>
+          </div>
+        );
+      })}
+      {filtered.length===0 && <div style={{ textAlign:"center", color:C.muted, padding:40 }}>لا يوجد متطوعين</div>}
+      {showAdd && (
+        <Modal title="إضافة متطوع" onClose={()=>setShowAdd(false)}>
+          <div style={{ marginBottom:12 }}><label style={lbl}>الاسم</label><input style={inp} value={newName} onChange={e=>setNewName(e.target.value)} placeholder="اسم المتطوع" /></div>
+          <div style={{ marginBottom:16 }}><label style={lbl}>التيم</label>
+            <select style={inp} value={newTeam} onChange={e=>setNewTeam(e.target.value)}>
+              {teams.map(t=><option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+            </select>
+          </div>
+          <button style={{ ...btn(C.green), width:"100%" }} onClick={addVol}>إضافة ✅</button>
+        </Modal>
+      )}
+      {delC && (
+        <Modal title="تأكيد الحذف" onClose={()=>setDelC(null)}>
+          <p style={{ marginBottom:16, color:C.text }}>هتحذف {delC.name}؟ البيانات مش هترجع.</p>
+          <div style={{ display:"flex", gap:10 }}>
+            <button style={{ ...btn(C.danger), flex:1 }} onClick={()=>delVol(delC.id)}>حذف 🗑️</button>
+            <button style={{ ...btnOut(), flex:1 }} onClick={()=>setDelC(null)}>إلغاء</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Add Points ─────────────────────────────────────────────────────────────────
+function AddPoints({ teams, volunteers, volTasks, loadAll, showToast, checkMilestones, isAdmin, fixedTeamId }) {
+  const [selTeam,setSelTeam]=useState(fixedTeamId||teams[0]?.id||"");
+  const [selVol,setSelVol]=useState(""); const [activeTask,setActiveTask]=useState(null);
+  const [note,setNote]=useState(""); const [moneyAmt,setMoneyAmt]=useState(""); const [loading,setLoading]=useState(false);
+
+  const teamVols = Object.entries(volunteers).filter(([,v])=>v.teamId===parseInt(selTeam)).map(([id,v])=>({...v,id}));
+  useEffect(()=>{setSelVol("");},[selTeam]);
+
+  const addVolPts = async () => {
+    if(!selVol||!activeTask) return;
+    const vol=volunteers[selVol]; setLoading(true);
+    await fbPush("volLogs",{volId:selVol,teamId:parseInt(selTeam),points:activeTask.points,desc:activeTask.name,note,date:new Date().toISOString()});
+    showToast(`✅ ${activeTask.points} نقطة لـ ${vol.name}`);
+    setNote(""); setActiveTask(null); loadAll(); setLoading(false);
+  };
+
+  const addMoney = async () => {
+    if(!selVol||!moneyAmt||parseInt(moneyAmt)<=0) return;
+    const amt=parseInt(moneyAmt); const vol=volunteers[selVol];
+    const pts=Math.floor(amt/10)+(Math.floor(amt/3000)*100);
+    setLoading(true);
+    await fbPush("moneyLogs",{volId:selVol,teamId:parseInt(selTeam),amount:amt,date:new Date().toISOString()});
+    await fbPush("volLogs",{volId:selVol,teamId:parseInt(selTeam),points:pts,desc:`تبرع ${amt} جنيه`,note,date:new Date().toISOString()});
+    showToast(`✅ ${amt} جنيه = ${pts} نقطة لـ ${vol.name}`);
+    await checkMilestones(parseInt(selTeam));
+    setMoneyAmt(""); setNote(""); loadAll(); setLoading(false);
+  };
+
+  return (
+    <div>
+      <h2 style={{ color:C.blue, marginBottom:16, fontSize:18 }}>➕ إضافة نقاط</h2>
+      {isAdmin && (
+        <div style={card}>
+          <label style={lbl}>اختر التيم</label>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {teams.map(t=><button key={t.id} onClick={()=>setSelTeam(t.id)} style={{ ...btn(selTeam===t.id?t.color:"#e8edf3"), color:selTeam===t.id?"#fff":C.muted, padding:"8px 16px" }}>{t.emoji} {t.name}</button>)}
+          </div>
+        </div>
+      )}
+      <div style={card}>
+        <label style={lbl}>اختر المتطوع</label>
+        <select style={inp} value={selVol} onChange={e=>setSelVol(e.target.value)}>
+          <option value="">-- اختر المتطوع --</option>
+          {teamVols.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}
+        </select>
+      </div>
+      {selVol && (<>
+        <div style={card}>
+          <label style={lbl}>المهمة</label>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {volTasks.map((t,i)=>(
+              <button key={i} onClick={()=>setActiveTask(activeTask?._key===t._key?null:t)}
+                style={{ padding:"8px 14px", borderRadius:12, border:"none", cursor:"pointer", fontSize:13, fontWeight:600,
+                  background:activeTask?._key===t._key?C.blue:"#f1f5f9", color:activeTask?._key===t._key?"#fff":C.text, transition:"all 0.2s" }}>
+                {t.icon} {t.name} ({t.points}نق)
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={card}>
+          <label style={lbl}>💰 تبرع بالفلوس</label>
+          <div style={{ display:"flex", gap:8 }}>
+            <input style={{ ...inp, flex:1 }} type="number" value={moneyAmt} onChange={e=>setMoneyAmt(e.target.value)} placeholder="المبلغ بالجنيه" />
+            <button style={btn(C.green)} onClick={addMoney} disabled={loading}>تسجيل</button>
+          </div>
+          {moneyAmt && <p style={{ fontSize:12, color:C.muted, marginTop:6 }}>= {Math.floor(parseInt(moneyAmt||0)/10)+(Math.floor(parseInt(moneyAmt||0)/3000)*100)} نقطة</p>}
+        </div>
+        <div style={card}>
+          <label style={lbl}>ملاحظة (اختياري)</label>
+          <input style={inp} value={note} onChange={e=>setNote(e.target.value)} placeholder="ملاحظة..." />
+        </div>
+        <button style={{ ...btn(C.blue), width:"100%", padding:"13px 0", fontSize:15 }} onClick={addVolPts} disabled={!activeTask||loading}>
+          {loading?"⏳ جاري...":activeTask?`إضافة ${activeTask.points} نقطة ✅`:"اختر مهمة أولاً"}
+        </button>
+      </>)}
+    </div>
+  );
+}
+
+// ── Team Missions ──────────────────────────────────────────────────────────────
+function TeamMissionsTab({ teams, teamMissions, getTeamMoneyTotal, loadAll, showToast }) {
+  const [selTeam,setSelTeam]=useState(teams[0]?.id||1);
+  const [showModal,setShowModal]=useState(false); const [editM,setEditM]=useState(null);
+  const [form,setForm]=useState({name:"",target:"",milestones:[{pct:50,points:30},{pct:80,points:60},{pct:100,points:100}]});
+
+  const list = Object.entries(teamMissions).filter(([,m])=>m.teamId===selTeam).map(([k,m])=>({...m,_key:k}));
+
+  const openAdd = () => { setEditM(null); setForm({name:"",target:"",milestones:[{pct:50,points:30},{pct:80,points:60},{pct:100,points:100}]}); setShowModal(true); };
+  const openEdit = (m) => { setEditM(m); setForm({name:m.name,target:m.target,milestones:m.milestones||[]}); setShowModal(true); };
+
+  const save = async () => {
+    if(!form.name||!form.target) return;
+    const data={teamId:selTeam,name:form.name,target:parseInt(form.target),milestones:form.milestones.map(ms=>({...ms,pct:parseInt(ms.pct),points:parseInt(ms.points),reached:ms.reached||false}))};
+    if(editM) await fbSet(`teamMissions/${editM._key}`,data); else await fbPush("teamMissions",data);
+    showToast("تم الحفظ ✅"); setShowModal(false); loadAll();
+  };
+  const del = async (k) => { await fbDelete(`teamMissions/${k}`); showToast("تم الحذف","error"); loadAll(); };
+  const updMS = (i,f,v) => { const ms=[...form.milestones]; ms[i]={...ms[i],[f]:v}; setForm(x=>({...x,milestones:ms})); };
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <h2 style={{ color:C.blue, margin:0, fontSize:18 }}>🎯 مهام التيم</h2>
+        <button style={btn(C.green)} onClick={openAdd}>+ جديد</button>
+      </div>
+      <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+        {teams.map(t=><button key={t.id} style={tab(selTeam===t.id)} onClick={()=>setSelTeam(t.id)}>{t.emoji} {t.name}</button>)}
+      </div>
+      {list.length===0 && <div style={{ textAlign:"center", color:C.muted, padding:40 }}>لا توجد مهام</div>}
+      {list.map(m=>{
+        const money=getTeamMoneyTotal(m.teamId);
+        return (
+          <div key={m._key} style={card}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+              <div><div style={{ fontWeight:700, fontSize:15 }}>🎯 {m.name}</div><div style={{ fontSize:12, color:C.muted }}>الهدف: {(m.target||0).toLocaleString()} جنيه</div></div>
+              <div style={{ display:"flex", gap:6 }}>
+                <button style={btn(C.gold,true)} onClick={()=>openEdit(m)}>✏️</button>
+                <button style={btn(C.danger,true)} onClick={()=>del(m._key)}>🗑️</button>
+              </div>
+            </div>
+            <ProgressBar value={money} max={m.target||1} milestones={m.milestones||[]} />
+          </div>
+        );
+      })}
+      {showModal && (
+        <Modal title={editM?"تعديل المهمة":"مهمة جديدة"} onClose={()=>setShowModal(false)}>
+          <div style={{ marginBottom:12 }}><label style={lbl}>اسم المهمة</label><input style={inp} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} /></div>
+          <div style={{ marginBottom:16 }}><label style={lbl}>الهدف (جنيه)</label><input style={inp} type="number" value={form.target} onChange={e=>setForm(f=>({...f,target:e.target.value}))} /></div>
+          <div style={{ marginBottom:12 }}>
+            <label style={lbl}>المراحل</label>
+            {form.milestones.map((ms,i)=>(
+              <div key={i} style={{ display:"flex", gap:6, marginBottom:8, alignItems:"center" }}>
+                <input style={{ ...inp, flex:1 }} type="number" value={ms.pct} onChange={e=>updMS(i,"pct",e.target.value)} placeholder="%" />
+                <span style={{ color:C.muted, fontSize:12 }}>%</span>
+                <input style={{ ...inp, flex:1 }} type="number" value={ms.points} onChange={e=>updMS(i,"points",e.target.value)} placeholder="نق" />
+                <span style={{ color:C.muted, fontSize:12 }}>نق</span>
+                <button onClick={()=>setForm(f=>({...f,milestones:f.milestones.filter((_,j)=>j!==i)}))} style={btn(C.danger,true)}>✕</button>
+              </div>
+            ))}
+            <button onClick={()=>setForm(f=>({...f,milestones:[...f.milestones,{pct:"",points:""}]}))} style={{ ...btnOut(C.blue), fontSize:12, padding:"6px 12px" }}>+ مرحلة</button>
+          </div>
+          <button style={{ ...btn(C.green), width:"100%" }} onClick={save}>حفظ ✅</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Vol Tasks ──────────────────────────────────────────────────────────────────
+function VolTasksTab({ volTasks, loadAll, showToast }) {
+  const [showModal,setShowModal]=useState(false); const [edit,setEdit]=useState(null);
+  const [form,setForm]=useState({name:"",points:"",icon:"⭐"});
+
+  const openAdd = () => { setEdit(null); setForm({name:"",points:"",icon:"⭐"}); setShowModal(true); };
+  const openEdit = (t) => { setEdit(t); setForm({name:t.name,points:t.points,icon:t.icon||"⭐"}); setShowModal(true); };
+  const save = async () => {
+    if(!form.name||!form.points) return;
+    const data={name:form.name,points:parseInt(form.points),icon:form.icon};
+    if(edit) await fbSet(`volTasks/${edit._key}`,data); else await fbPush("volTasks",data);
+    showToast("تم الحفظ ✅"); setShowModal(false); loadAll();
+  };
+  const del = async (k) => { await fbDelete(`volTasks/${k}`); showToast("تم الحذف","error"); loadAll(); };
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <h2 style={{ color:C.blue, margin:0, fontSize:18 }}>⚙️ مهام الأفراد</h2>
+        <button style={btn(C.green)} onClick={openAdd}>+ مهمة</button>
+      </div>
+      {volTasks.map(t=>(
+        <div key={t._key} style={{ ...card, padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div><span style={{ fontSize:20, marginLeft:8 }}>{t.icon}</span><b style={{ fontSize:14 }}>{t.name}</b></div>
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <span style={{ fontWeight:800, color:C.gold, fontSize:15 }}>{t.points} نق</span>
+            <button style={btn(C.gold,true)} onClick={()=>openEdit(t)}>✏️</button>
+            <button style={btn(C.danger,true)} onClick={()=>del(t._key)}>🗑️</button>
+          </div>
+        </div>
+      ))}
+      {showModal && (
+        <Modal title={edit?"تعديل":"مهمة جديدة"} onClose={()=>setShowModal(false)}>
+          <div style={{ marginBottom:12 }}><label style={lbl}>الإيموجي</label><input style={inp} value={form.icon} onChange={e=>setForm(f=>({...f,icon:e.target.value}))} maxLength={2} /></div>
+          <div style={{ marginBottom:12 }}><label style={lbl}>اسم المهمة</label><input style={inp} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} /></div>
+          <div style={{ marginBottom:16 }}><label style={lbl}>النقاط</label><input style={inp} type="number" value={form.points} onChange={e=>setForm(f=>({...f,points:e.target.value}))} /></div>
+          <button style={{ ...btn(C.green), width:"100%" }} onClick={save}>حفظ ✅</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Edit Teams ─────────────────────────────────────────────────────────────────
+function EditTeamsTab({ teams, loadAll, showToast }) {
+  const [editing,setEditing]=useState(null); const [form,setForm]=useState({});
+  const openEdit = (t) => { setEditing(t); setForm({name:t.name,color:t.color,emoji:t.emoji}); };
+  const save = async () => {
+    await fbSet(`teams/${editing._key}`,{...editing,name:form.name,color:form.color,emoji:form.emoji});
+    showToast("تم التحديث ✅"); setEditing(null); loadAll();
+  };
+  return (
+    <div>
+      <h2 style={{ color:C.blue, marginBottom:16, fontSize:18 }}>✏️ التيمات</h2>
+      {teams.map(t=>(
+        <div key={t.id} style={{ ...card, borderRight:`5px solid ${t.color}` }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ fontSize:20 }}>{t.emoji} <b>{t.name}</b></div>
+            <button style={btn(C.gold,true)} onClick={()=>openEdit(t)}>✏️ تعديل</button>
+          </div>
+          {editing?._key===t._key && (
+            <div style={{ marginTop:14 }}>
+              <div style={{ marginBottom:10 }}><label style={lbl}>الإيموجي</label><input style={inp} value={form.emoji} onChange={e=>setForm(f=>({...f,emoji:e.target.value}))} maxLength={2} /></div>
+              <div style={{ marginBottom:10 }}><label style={lbl}>اسم التيم</label><input style={inp} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} /></div>
+              <div style={{ marginBottom:14 }}>
+                <label style={lbl}>اللون</label>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <input type="color" value={form.color} onChange={e=>setForm(f=>({...f,color:e.target.value}))} style={{ width:48, height:40, borderRadius:8, border:"none", cursor:"pointer" }} />
+                  <input style={{ ...inp, flex:1 }} value={form.color} onChange={e=>setForm(f=>({...f,color:e.target.value}))} />
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:8 }}>
+                <button style={{ ...btn(C.green), flex:1 }} onClick={save}>حفظ</button>
+                <button style={{ ...btnOut(), flex:1 }} onClick={()=>setEditing(null)}>إلغاء</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Leader Team View ───────────────────────────────────────────────────────────
+function LeaderTeam({ myTeam, volunteers, teamMissions, getVolPoints, getTeamMoneyTotal, getTeamVolPoints, getTeamTeamPoints }) {
+  if(!myTeam) return <div style={{ textAlign:"center", padding:40, color:C.muted }}>تيمك مش موجود</div>;
+  const teamVols = Object.entries(volunteers).filter(([,v])=>v.teamId===myTeam.id).map(([id,v])=>({...v,id,pts:getVolPoints(id)})).sort((a,b)=>b.pts-a.pts);
+  const money=getTeamMoneyTotal(myTeam.id);
+  const volPts=getTeamVolPoints(myTeam.id);
+  const teamPts=getTeamTeamPoints(myTeam.id);
+  const moneyPts=Math.floor(money/10)+Math.floor(money/3000)*100;
+  const missions=Object.entries(teamMissions).filter(([,m])=>m.teamId===myTeam.id).map(([k,m])=>({...m,_key:k}));
+  return (
+    <div>
+      <div style={{ ...card, background:`linear-gradient(135deg,${myTeam.color}22,${myTeam.color}11)`, borderRight:`5px solid ${myTeam.color}` }}>
+        <div style={{ fontSize:40, textAlign:"center", marginBottom:8 }}>{myTeam.emoji}</div>
+        <h2 style={{ textAlign:"center", color:myTeam.color, margin:"0 0 16px" }}>{myTeam.name}</h2>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8, textAlign:"center" }}>
+          {[["نقاط أفراد",volPts,C.blue],["نقاط تيم",teamPts,C.green],["نقاط تبرع",moneyPts,C.gold],["جنيه",money,"#7c3aed"]].map(([label,val,col])=>(
+            <div key={label} style={{ background:"rgba(255,255,255,0.85)", borderRadius:12, padding:"10px 4px" }}>
+              <div style={{ fontWeight:800, fontSize:18, color:col }}>{(val||0).toLocaleString()}</div>
+              <div style={{ fontSize:10, color:C.muted }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {missions.length > 0 && (
+        <div style={card}>
+          <h3 style={{ color:C.blue, marginTop:0, fontSize:15 }}>🎯 مهام التيم</h3>
+          {missions.map(m=>(
+            <div key={m._key} style={{ marginBottom:16 }}>
+              <div style={{ fontWeight:600, marginBottom:6 }}>🎯 {m.name}</div>
+              <ProgressBar value={money} max={m.target||1} milestones={m.milestones||[]} color={myTeam.color} />
+            </div>
+          ))}
+        </div>
+      )}
+      <h3 style={{ color:C.blue, marginBottom:12, fontSize:16 }}>👥 أعضاء التيم ({teamVols.length})</h3>
+      {teamVols.map((v,i)=>(
+        <div key={v.id} style={{ ...card, padding:"12px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+            <span style={{ fontWeight:700, color:C.muted }}>#{ i+1}</span>
+            <span style={{ fontWeight:600 }}>{v.name}</span>
+          </div>
+          <span style={{ fontWeight:800, color:myTeam.color, fontSize:16 }}>{v.pts} نقطة</span>
+        </div>
+      ))}
+      {teamVols.length===0 && <div style={{ textAlign:"center", color:C.muted, padding:30 }}>لا يوجد أعضاء في التيم</div>}
+    </div>
+  );
+}
+
+// ── Share Images ───────────────────────────────────────────────────────────────
+function ShareTab({ teams, volunteers, getVolPoints, getTeamVolPoints, getTeamTeamPoints, getTeamMoneyTotal, getTeamMoneyPoints, isAdmin, fixedTeamId }) {
+  const canvasRef=useRef(null); const [type,setType]=useState("daily");
+  const [selTeam,setSelTeam]=useState(fixedTeamId||teams[0]?.id); const [preview,setPreview]=useState(null);
+
+  const rr=(ctx,x,y,w,h,r)=>{ ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);ctx.lineTo(x+r,y+h);ctx.arcTo(x,y+h,x,y+h-r,r);ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);ctx.closePath();ctx.fill(); };
+
+  const drawShare = useCallback(()=>{
+    const canvas=canvasRef.current; if(!canvas) return;
+    const ctx=canvas.getContext("2d"); canvas.width=800; canvas.height=900;
+    ctx.fillStyle="#0A4976"; ctx.fillRect(0,0,800,900);
+    const g=ctx.createLinearGradient(0,0,800,200); g.addColorStop(0,"#0d5fa0"); g.addColorStop(1,"#0A4976");
+    ctx.fillStyle=g; ctx.fillRect(0,0,800,200);
+    ctx.fillStyle="#FBAE42"; ctx.fillRect(0,198,800,4);
+    ctx.fillStyle="#FBAE42"; ctx.font="bold 36px 'Segoe UI',Tahoma,sans-serif"; ctx.textAlign="center"; ctx.fillText("سفراء الأضاحي 🌟",400,75);
+    ctx.fillStyle="rgba(255,255,255,0.8)"; ctx.font="20px 'Segoe UI'"; ctx.fillText(type==="daily"?"⭐ أبطال اليوم":type==="cumulative"?"📊 النتائج التراكمية":"🆚 مقارنة التيمات",400,115);
+    ctx.fillStyle="rgba(255,255,255,0.5)"; ctx.font="14px 'Segoe UI'"; ctx.fillText(new Date().toLocaleDateString("ar-EG"),400,150);
+
+    if(type==="comparison"&&isAdmin){
+      const sorted=[...teams].map(t=>({...t,total:getTeamVolPoints(t.id)+getTeamTeamPoints(t.id)+getTeamMoneyPoints(t.id)})).sort((a,b)=>b.total-a.total);
+      const medals=["🥇","🥈","🥉"];
+      sorted.forEach((t,i)=>{
+        const y=230+i*210;
+        ctx.fillStyle=t.color+"33"; rr(ctx,60,y,680,180,20);
+        ctx.fillStyle=t.color; ctx.fillRect(60,y,8,180);
+        ctx.fillStyle="#fff"; ctx.font="bold 30px 'Segoe UI'"; ctx.textAlign="right";
+        ctx.fillText(`${medals[i]||"#"+(i+1)} ${t.emoji} ${t.name}`,700,y+60);
+        ctx.font="bold 44px 'Segoe UI'"; ctx.fillStyle=t.color;
+        ctx.fillText(`${t.total.toLocaleString()} نقطة`,700,y+130);
+      });
+    } else {
+      const tid=parseInt(selTeam); const team=teams.find(t=>t.id===tid); if(!team) return;
+      const top=Object.entries(volunteers).filter(([,v])=>v.teamId===tid).map(([id,v])=>({...v,id,pts:getVolPoints(id)})).sort((a,b)=>b.pts-a.pts).slice(0,3);
+      ctx.fillStyle=team.color; ctx.font="bold 32px 'Segoe UI'"; ctx.textAlign="center"; ctx.fillText(`${team.emoji} ${team.name}`,400,260);
+      const medals=["🥇","🥈","🥉"];
+      top.forEach((v,i)=>{
+        const y=300+i*175;
+        ctx.fillStyle="rgba(255,255,255,0.08)"; rr(ctx,80,y,640,145,16);
+        ctx.fillStyle="#fff"; ctx.font="bold 24px 'Segoe UI'"; ctx.textAlign="right";
+        ctx.fillText(`${medals[i]} ${v.name}`,680,y+55);
+        ctx.fillStyle="#FBAE42"; ctx.font="bold 36px 'Segoe UI'";
+        ctx.fillText(`${v.pts.toLocaleString()} نقطة`,680,y+105);
+      });
+      if(top.length===0){ ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.font="24px 'Segoe UI'"; ctx.textAlign="center"; ctx.fillText("لا يوجد متطوعين بعد",400,500); }
+    }
+    ctx.fillStyle="rgba(255,255,255,0.12)"; ctx.fillRect(0,820,800,80);
+    ctx.fillStyle="#FBAE42"; ctx.font="bold 20px 'Segoe UI'"; ctx.textAlign="center";
+    ctx.fillText("إنت مش متطوع… إنت سفير 🌟",400,868);
+    setPreview(canvas.toDataURL("image/png"));
+  },[type,selTeam,teams,volunteers,getVolPoints,getTeamVolPoints,getTeamTeamPoints,getTeamMoneyPoints,isAdmin]);
+
+  useEffect(()=>{ if(teams.length) drawShare(); },[drawShare,teams]);
+
+  const download=()=>{ const a=document.createElement("a"); a.href=preview; a.download=`sofara-${type}-${Date.now()}.png`; a.click(); };
+
+  return (
+    <div>
+      <h2 style={{ color:C.blue, marginBottom:16, fontSize:18 }}>📤 مشاركة</h2>
+      <div style={card}>
+        <label style={lbl}>نوع الصورة</label>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>
+          {[["daily","📅 يومي"],["cumulative","📊 تراكمي"],...(isAdmin?[["comparison","🆚 مقارنة"]]:[])]
+            .map(([v,l])=><button key={v} style={tab(type===v)} onClick={()=>setType(v)}>{l}</button>)}
+        </div>
+        {type!=="comparison" && (<>
+          <label style={lbl}>التيم</label>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>
+            {teams.map(t=><button key={t.id} style={tab(selTeam===t.id)} onClick={()=>setSelTeam(t.id)}>{t.emoji} {t.name}</button>)}
+          </div>
+        </>)}
+        <button style={{ ...btn(C.blue), width:"100%", marginBottom:12 }} onClick={drawShare}>🎨 توليد الصورة</button>
+        {preview && <button style={{ ...btn(C.green), width:"100%" }} onClick={download}>⬇️ تحميل PNG</button>}
+      </div>
+      {preview && <img src={preview} alt="preview" style={{ width:"100%", borderRadius:16, marginTop:12, boxShadow:"0 4px 20px rgba(0,0,0,0.15)" }} />}
+      <canvas ref={canvasRef} style={{ display:"none" }} />
+    </div>
+  );
+}
+
+// ── Weekly Winner ──────────────────────────────────────────────────────────────
+function WeeklyWinnerTab({ teams, volunteers, weeklyWinners, getTeamVolPoints, getTeamTeamPoints, getTeamMoneyPoints, getVolPoints, loadAll, showToast }) {
+  const [note,setNote]=useState(""); const [loading,setLoading]=useState(false);
+  const canvasRef=useRef(null); const [preview,setPreview]=useState(null);
+  const ranked=[...teams].map(t=>({...t,total:getTeamVolPoints(t.id)+getTeamTeamPoints(t.id)+getTeamMoneyPoints(t.id)})).sort((a,b)=>b.total-a.total);
+  const topVol=Object.entries(volunteers).map(([id,v])=>({...v,id,pts:getVolPoints(id)})).sort((a,b)=>b.pts-a.pts)[0];
+  const winner=ranked[0];
+
+  const saveWinner=async()=>{ setLoading(true); await fbPush("weeklyWinners",{date:new Date().toISOString(),teamWinner:winner?.name,topVolName:topVol?.name,topVolPoints:topVol?.pts,note}); showToast("تم حفظ الحسم ✅"); setLoading(false); loadAll(); };
+
+  const drawWinner=()=>{
+    const canvas=canvasRef.current; if(!canvas||!winner) return;
+    const ctx=canvas.getContext("2d"); canvas.width=800; canvas.height=900;
+    const g=ctx.createRadialGradient(400,400,0,400,400,600); g.addColorStop(0,"#1a6fa8"); g.addColorStop(1,"#0A4976");
+    ctx.fillStyle=g; ctx.fillRect(0,0,800,900);
+    ctx.fillStyle="#FBAE42"; ctx.font="bold 42px 'Segoe UI'"; ctx.textAlign="center"; ctx.fillText("🏆 الحسم الأسبوعي",400,85);
+    ctx.fillStyle=winner.color+"55"; ctx.beginPath(); ctx.arc(400,320,180,0,Math.PI*2); ctx.fill();
+    ctx.font="bold 110px 'Segoe UI'"; ctx.fillText(winner.emoji,400,375);
+    ctx.fillStyle="#fff"; ctx.font="bold 38px 'Segoe UI'"; ctx.fillText(winner.name,400,455);
+    ctx.fillStyle="#FBAE42"; ctx.font="bold 28px 'Segoe UI'"; ctx.fillText(`${winner.total.toLocaleString()} نقطة`,400,505);
+    if(topVol){
+      ctx.fillStyle="rgba(255,255,255,0.1)"; ctx.beginPath(); ctx.roundRect(150,560,500,110,20); ctx.fill();
+      ctx.fillStyle="#FBAE42"; ctx.font="bold 18px 'Segoe UI'"; ctx.fillText("⭐ أفضل متطوع",400,605);
+      ctx.fillStyle="#fff"; ctx.font="bold 26px 'Segoe UI'"; ctx.fillText(topVol.name,400,643);
+      ctx.fillStyle="#22C55E"; ctx.font="18px 'Segoe UI'"; ctx.fillText(`${topVol.pts} نقطة`,400,672);
+    }
+    if(note){ ctx.fillStyle="rgba(255,255,255,0.75)"; ctx.font="20px 'Segoe UI'"; ctx.fillText(note,400,730); }
+    ctx.fillStyle="#FBAE42"; ctx.font="bold 20px 'Segoe UI'"; ctx.fillText("إنت مش متطوع… إنت سفير 🌟",400,862);
+    setPreview(canvas.toDataURL("image/png"));
+  };
+  const download=()=>{ const a=document.createElement("a"); a.href=preview; a.download=`winner-${Date.now()}.png`; a.click(); };
+  const wList=Object.entries(weeklyWinners||{}).sort((a,b)=>new Date(b[1].date)-new Date(a[1].date));
+
+  return (
+    <div>
+      <h2 style={{ color:C.blue, marginBottom:16, fontSize:18 }}>🗓️ الحسم الأسبوعي</h2>
+      <div style={card}>
+        <div style={{ textAlign:"center", padding:"16px 0" }}>
+          {winner&&<><div style={{ fontSize:60 }}>{winner.emoji}</div><div style={{ fontWeight:800, fontSize:22, color:winner.color, marginTop:8 }}>{winner.name}</div><div style={{ color:C.gold, fontWeight:700 }}>{winner.total.toLocaleString()} نقطة</div></>}
+          {topVol&&<div style={{ marginTop:12, color:C.muted, fontSize:14 }}>⭐ أفضل متطوع: <b style={{color:C.text}}>{topVol.name}</b> ({topVol.pts} نقطة)</div>}
+        </div>
+        <div style={{ marginBottom:12 }}><label style={lbl}>رسالة خاصة (اختياري)</label><input style={inp} value={note} onChange={e=>setNote(e.target.value)} placeholder="جملة تحفيزية..." /></div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button style={{ ...btn(C.gold), flex:1 }} onClick={drawWinner}>🎨 توليد</button>
+          <button style={{ ...btn(C.green), flex:1 }} onClick={saveWinner} disabled={loading}>💾 حفظ</button>
+        </div>
+        {preview&&<><img src={preview} style={{ width:"100%", borderRadius:12, marginTop:12 }} alt="winner"/><button style={{ ...btn(C.blue), width:"100%", marginTop:8 }} onClick={download}>⬇️ تحميل</button></>}
+      </div>
+      {wList.length>0&&<>
+        <h3 style={{ color:C.blue, marginBottom:12 }}>السجل السابق</h3>
+        {wList.slice(0,5).map(([k,w])=>(
+          <div key={k} style={{ ...card, padding:"12px 14px" }}>
+            <div style={{ fontWeight:700 }}>🏆 {w.teamWinner}</div>
+            <div style={{ fontSize:12, color:C.muted }}>⭐ {w.topVolName} — {w.topVolPoints} نقطة</div>
+            {w.note&&<div style={{ fontSize:12, color:C.text, marginTop:4 }}>{w.note}</div>}
+            <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>{new Date(w.date).toLocaleDateString("ar-EG")}</div>
+          </div>
+        ))}
+      </>}
+      <canvas ref={canvasRef} style={{ display:"none" }} />
+    </div>
+  );
+}
+
+// ── MAIN APP ───────────────────────────────────────────────────────────────────
+function App() {
+  const [user,setUser]=useState(null); const [tab,setTab]=useState(0);
+  const [toast,setToast]=useState(null); const [loading,setLoading]=useState(false);
+  const [teams,setTeams]=useState([]); const [volTasks,setVolTasks]=useState([]);
+  const [volunteers,setVolunteers]=useState({}); const [volLogs,setVolLogs]=useState({});
+  const [teamLogs,setTeamLogs]=useState({}); const [moneyLogs,setMoneyLogs]=useState({});
+  const [teamMissions,setTeamMissions]=useState({}); const [weeklyWinners,setWeeklyWinners]=useState({});
+
+  const showToast=useCallback((msg,type="success")=>{ setToast({msg,type,id:Date.now()}); },[]);
+
+  const loadAll=useCallback(async()=>{
+    setLoading(true);
+    try {
+      const [t,vt,vs,vl,tl,ml,tm,ww]=await Promise.all([fbGet("teams"),fbGet("volTasks"),fbGet("volunteers"),fbGet("volLogs"),fbGet("teamLogs"),fbGet("moneyLogs"),fbGet("teamMissions"),fbGet("weeklyWinners")]);
+      setTeams(t?Object.entries(t).map(([k,v])=>({...v,_key:k})):[]);
+      setVolTasks(vt?Object.entries(vt).map(([k,v])=>({...v,_key:k})):[]);
+      setVolunteers(vs||{}); setVolLogs(vl||{}); setTeamLogs(tl||{}); setMoneyLogs(ml||{}); setTeamMissions(tm||{}); setWeeklyWinners(ww||{});
+    } catch(e){ showToast("خطأ في تحميل البيانات","error"); }
+    setLoading(false);
+  },[showToast]);
+
+  const seedData=useCallback(async()=>{
+    const ex=await fbGet("teams");
+    if(!ex){ const o={}; DEF_TEAMS.forEach(t=>{o[`team_${t.id}`]=t;}); await fbSet("teams",o); }
+    const et=await fbGet("volTasks");
+    if(!et){ const o={}; DEF_TASKS.forEach((t,i)=>{o[`task_${i}`]=t;}); await fbSet("volTasks",o); }
+  },[]);
+
+  useEffect(()=>{ if(user) seedData().then(loadAll); },[user,seedData,loadAll]);
+
+  const getVolPoints=useCallback((volId)=>Object.values(volLogs).filter(l=>l.volId===volId).reduce((s,l)=>s+(l.points||0),0),[volLogs]);
+  const getTeamMoneyTotal=useCallback((tid)=>Object.values(moneyLogs).filter(l=>l.teamId===tid).reduce((s,l)=>s+(l.amount||0),0),[moneyLogs]);
+  const getTeamVolPoints=useCallback((tid)=>{ const vs=Object.entries(volunteers).filter(([,v])=>v.teamId===tid); return vs.reduce((s,[vid])=>s+getVolPoints(vid),0); },[volunteers,getVolPoints]);
+  const getTeamTeamPoints=useCallback((tid)=>Object.values(teamLogs).filter(l=>l.teamId===tid).reduce((s,l)=>s+(l.points||0),0),[teamLogs]);
+  const getTeamMoneyPoints=useCallback((tid)=>{ const m=getTeamMoneyTotal(tid); return Math.floor(m/10)+Math.floor(m/3000)*100; },[getTeamMoneyTotal]);
+
+  const checkMilestones=useCallback(async(teamId)=>{
+    const missions=Object.entries(teamMissions).filter(([,m])=>m.teamId===teamId);
+    const money=getTeamMoneyTotal(teamId);
+    for(const [mKey,mission] of missions){
+      const updated={...mission,milestones:[...(mission.milestones||[])]};
+      let changed=false;
+      for(let i=0;i<updated.milestones.length;i++){
+        const ms=updated.milestones[i];
+        if(!ms.reached&&money>=(ms.pct/100)*mission.target){
+          updated.milestones[i]={...ms,reached:true}; changed=true;
+          await fbPush("teamLogs",{teamId,points:ms.points,desc:`وصل ${mission.name} ${ms.pct}%`,date:new Date().toISOString()});
+          showToast(`🎉 التيم وصل ${ms.pct}% في ${mission.name}! +${ms.points} نقطة`);
+        }
+      }
+      if(changed) await fbSet(`teamMissions/${mKey}`,updated);
+    }
+  },[teamMissions,getTeamMoneyTotal,showToast]);
+
+  if(!user) return <Login onLogin={(acc)=>{setUser(acc);setTab(0);}}/>;
+
+  const ADMIN_TABS=["🏆 الترتيب","👥 المتطوعين","➕ نقاط أفراد","🎯 مهام التيم","⚙️ مهام الأفراد","✏️ التيمات","📤 مشاركة","🗓️ حسم"];
+  const LEADER_TABS=["👥 تيمي","➕ نقاط","📤 مشاركة"];
+  const tabs = user.role==="admin"?ADMIN_TABS:LEADER_TABS;
+  const teamData=teams.find(t=>t.id===user.teamId);
+  const myTeam=teams.find(t=>t.id===user.teamId);
+
+  const renderTab=()=>{
+    const shared={teams,volunteers,getVolPoints,getTeamVolPoints,getTeamTeamPoints,getTeamMoneyTotal,getTeamMoneyPoints};
+    if(user.role==="admin"){
+      switch(tab){
+        case 0: return <AdminLeaderboard {...shared}/>;
+        case 1: return <AdminVolunteers teams={teams} volunteers={volunteers} getVolPoints={getVolPoints} loadAll={loadAll} showToast={showToast}/>;
+        case 2: return <AddPoints teams={teams} volunteers={volunteers} volTasks={volTasks} loadAll={loadAll} showToast={showToast} checkMilestones={checkMilestones} isAdmin={true}/>;
+        case 3: return <TeamMissionsTab teams={teams} teamMissions={teamMissions} getTeamMoneyTotal={getTeamMoneyTotal} loadAll={loadAll} showToast={showToast}/>;
+        case 4: return <VolTasksTab volTasks={volTasks} loadAll={loadAll} showToast={showToast}/>;
+        case 5: return <EditTeamsTab teams={teams} loadAll={loadAll} showToast={showToast}/>;
+        case 6: return <ShareTab {...shared} isAdmin={true}/>;
+        case 7: return <WeeklyWinnerTab teams={teams} volunteers={volunteers} weeklyWinners={weeklyWinners} getTeamVolPoints={getTeamVolPoints} getTeamTeamPoints={getTeamTeamPoints} getTeamMoneyPoints={getTeamMoneyPoints} getVolPoints={getVolPoints} loadAll={loadAll} showToast={showToast}/>;
+        default: return null;
+      }
+    } else {
+      switch(tab){
+        case 0: return <LeaderTeam myTeam={myTeam} volunteers={volunteers} teamMissions={teamMissions} getVolPoints={getVolPoints} getTeamMoneyTotal={getTeamMoneyTotal} getTeamVolPoints={getTeamVolPoints} getTeamTeamPoints={getTeamTeamPoints}/>;
+        case 1: return <AddPoints teams={myTeam?[myTeam]:[]} volunteers={volunteers} volTasks={volTasks} loadAll={loadAll} showToast={showToast} checkMilestones={checkMilestones} isAdmin={false} fixedTeamId={user.teamId}/>;
+        case 2: return <ShareTab teams={myTeam?[myTeam]:[]} volunteers={volunteers} getVolPoints={getVolPoints} getTeamVolPoints={getTeamVolPoints} getTeamTeamPoints={getTeamTeamPoints} getTeamMoneyTotal={getTeamMoneyTotal} getTeamMoneyPoints={getTeamMoneyPoints} isAdmin={false} fixedTeamId={user.teamId}/>;
+        default: return null;
+      }
+    }
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, fontFamily:"'Segoe UI',Tahoma,Arial,sans-serif", direction:"rtl" }}>
+      {/* Header */}
+      <div style={{ background:`linear-gradient(135deg,${C.blue} 0%,#0d5fa0 100%)`, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 16px rgba(10,73,118,0.35)" }}>
+        <div>
+          <div style={{ color:C.gold, fontWeight:800, fontSize:18 }}>🌟 سفراء الأضاحي</div>
+          <div style={{ color:"rgba(255,255,255,0.65)", fontSize:11 }}>{user.role==="admin"?"مدير النظام":`قائد ${teamData?.name||""}`}</div>
+        </div>
+        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          {loading&&<span style={{ color:C.gold, fontSize:16 }}>⏳</span>}
+          <button onClick={loadAll} style={{ ...btn(C.gold), padding:"6px 12px", fontSize:12 }}>🔄</button>
+          <button onClick={()=>setUser(null)} style={{ ...btn("#dc2626"), padding:"6px 12px", fontSize:12 }}>خروج</button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display:"flex", gap:4, overflowX:"auto", padding:"10px 12px", background:"#fff", borderBottom:`2px solid ${C.bg}`, scrollbarWidth:"none" }}>
+        {tabs.map((t,i)=><button key={i} style={tab(tab===i)} onClick={()=>setTab(i)}>{t}</button>)}
+      </div>
+
+      {/* Content */}
+      <div style={{ padding:"16px", maxWidth:700, margin:"0 auto" }}>
+        {renderTab()}
+      </div>
+
+      {toast&&<Toast key={toast.id} msg={toast.msg} type={toast.type} onDone={()=>setToast(null)}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
